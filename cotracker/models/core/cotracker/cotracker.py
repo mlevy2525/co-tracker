@@ -295,36 +295,28 @@ class CoTracker2(nn.Module):
             if ind > 0:
                 overlap = S - step
                 copy_over = (queried_frames < ind + overlap)[:, None, :, None]  # B 1 N 1
-                # if one_frame:
-                #     coords_prev = torch.nn.functional.pad(
-                #         coords_predicted[:, ind : ind + overlap + step - 1] / self.stride,
-                #         (0, 0, 0, 0, 0, 1),
-                #         "replicate",
-                #     )  # B S N 2
-                #     vis_prev = torch.nn.functional.pad(
-                #         vis_predicted[:, ind : ind + overlap + step - 1, :, None].clone(),
-                #         (0, 0, 0, 0, 0, 1),
-                #         "replicate",
-                #     )  # B S N 1
-                # else:
                 coords_prev = torch.nn.functional.pad(
                     coords_predicted[:, ind : ind + overlap] / self.stride,
                     (0, 0, 0, 0, 0, step),
                     "replicate",
                 )  # B S N 2
-                # vis_prev = torch.nn.functional.pad(
-                #     vis_predicted[:, ind : ind + overlap, :, None].clone(),
-                #     (0, 0, 0, 0, 0, step),
-                #     "replicate",
-                # )  # B S N 1
+                vis_prev = torch.nn.functional.pad(
+                    vis_predicted[:, ind : ind + overlap, :, None].clone(),
+                    (0, 0, 0, 0, 0, step),
+                    "replicate",
+                )  # B S N 1
                 coords_init = torch.where(
                     copy_over.expand_as(coords_init), coords_prev, coords_init
                 )
-                # vis_init = torch.where(copy_over.expand_as(vis_init), vis_prev, vis_init)
+                vis_init = torch.where(copy_over.expand_as(vis_init), vis_prev, vis_init)
+                vis_init = torch.where(vis_init > .1, vis_init, .1)
 
             # The attention mask is 1 for the spatio-temporal points within
             # a track which is updated in the current window
             attention_mask = (queried_frames < ind + S).reshape(B, 1, N).repeat(1, S, 1)  # B S N
+            if ind < S:
+                idx = min((S - ind - 1), step - 1)
+                attention_mask[:, :idx, :] = False
 
             # The track mask is 1 for the spatio-temporal points that actually
             # need updating: only after begin queried, and not if contained
@@ -347,9 +339,6 @@ class CoTracker2(nn.Module):
                 attention_mask=attention_mask,
                 iters=iters,
             )
-
-            if ind == 0 and one_frame:
-                vis = torch.ones((B, S, N), device=device).float() * 10
 
             S_trimmed = T if is_online else min(T - ind, S)  # accounts for last window duration
             coords_predicted[:, ind : ind + S] = coords[-1][:, :S_trimmed]
