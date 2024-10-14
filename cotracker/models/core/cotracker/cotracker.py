@@ -309,7 +309,8 @@ class CoTracker2(nn.Module):
                     copy_over.expand_as(coords_init), coords_prev, coords_init
                 )
                 vis_init = torch.where(copy_over.expand_as(vis_init), vis_prev, vis_init)
-                vis_init = torch.where(vis_init > .1, vis_init, .1)
+                vis_init = torch.where(vis_init < 10, vis_init, 10)
+                vis_init = torch.where(vis_init > -10, vis_init, -10)
 
             # The attention mask is 1 for the spatio-temporal points within
             # a track which is updated in the current window
