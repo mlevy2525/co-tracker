@@ -180,7 +180,7 @@ class CoTracker2(nn.Module):
         self.online_coords_predicted = None
         self.online_vis_predicted = None
 
-    def forward(self, video, queries, iters=4, is_train=False, is_online=False):
+    def forward(self, video, queries, iters=4, is_train=False, is_online=False, one_frame=True):
         """Predict tracks
 
         Args:
@@ -242,7 +242,10 @@ class CoTracker2(nn.Module):
                 self.online_vis_predicted = vis_predicted
             else:
                 # Pad online predictions with zeros for the current window
-                pad = min(step, T - step)
+                if one_frame:
+                    pad = min(1, T - 1)
+                else:
+                    pad = min(step, T - step)
                 coords_predicted = F.pad(
                     self.online_coords_predicted, (0, 0, 0, 0, 0, pad), "constant"
                 )
@@ -292,20 +295,32 @@ class CoTracker2(nn.Module):
             if ind > 0:
                 overlap = S - step
                 copy_over = (queried_frames < ind + overlap)[:, None, :, None]  # B 1 N 1
+                # if one_frame:
+                #     coords_prev = torch.nn.functional.pad(
+                #         coords_predicted[:, ind : ind + overlap + step - 1] / self.stride,
+                #         (0, 0, 0, 0, 0, 1),
+                #         "replicate",
+                #     )  # B S N 2
+                #     vis_prev = torch.nn.functional.pad(
+                #         vis_predicted[:, ind : ind + overlap + step - 1, :, None].clone(),
+                #         (0, 0, 0, 0, 0, 1),
+                #         "replicate",
+                #     )  # B S N 1
+                # else:
                 coords_prev = torch.nn.functional.pad(
                     coords_predicted[:, ind : ind + overlap] / self.stride,
                     (0, 0, 0, 0, 0, step),
                     "replicate",
                 )  # B S N 2
-                vis_prev = torch.nn.functional.pad(
-                    vis_predicted[:, ind : ind + overlap, :, None].clone(),
-                    (0, 0, 0, 0, 0, step),
-                    "replicate",
-                )  # B S N 1
+                # vis_prev = torch.nn.functional.pad(
+                #     vis_predicted[:, ind : ind + overlap, :, None].clone(),
+                #     (0, 0, 0, 0, 0, step),
+                #     "replicate",
+                # )  # B S N 1
                 coords_init = torch.where(
                     copy_over.expand_as(coords_init), coords_prev, coords_init
                 )
-                vis_init = torch.where(copy_over.expand_as(vis_init), vis_prev, vis_init)
+                # vis_init = torch.where(copy_over.expand_as(vis_init), vis_prev, vis_init)
 
             # The attention mask is 1 for the spatio-temporal points within
             # a track which is updated in the current window
@@ -333,15 +348,22 @@ class CoTracker2(nn.Module):
                 iters=iters,
             )
 
+            if ind == 0 and one_frame:
+                vis = torch.ones((B, S, N), device=device).float() * 10
+
             S_trimmed = T if is_online else min(T - ind, S)  # accounts for last window duration
             coords_predicted[:, ind : ind + S] = coords[-1][:, :S_trimmed]
             vis_predicted[:, ind : ind + S] = vis[:, :S_trimmed]
+
             if is_train:
                 all_coords_predictions.append([coord[:, :S_trimmed] for coord in coords])
                 all_vis_predictions.append(torch.sigmoid(vis[:, :S_trimmed]))
 
         if is_online:
-            self.online_ind += step
+            if one_frame:
+                self.online_ind += 1
+            else:
+                self.online_ind += step
             self.online_coords_predicted = coords_predicted
             self.online_vis_predicted = vis_predicted
         vis_predicted = torch.sigmoid(vis_predicted)

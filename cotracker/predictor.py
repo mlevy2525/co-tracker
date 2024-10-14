@@ -200,6 +200,7 @@ class CoTrackerOnlinePredictor(torch.nn.Module):
         grid_size: int = 10,
         grid_query_frame: int = 0,
         add_support_grid=False,
+        one_frame=True,
     ):
         B, T, C, H, W = video_chunk.shape
         # Initialize online video processing and save queried points
@@ -244,6 +245,7 @@ class CoTrackerOnlinePredictor(torch.nn.Module):
             queries=self.queries,
             iters=6,
             is_online=True,
+            one_frame=one_frame,
         )
         thr = 0.9
         return (
