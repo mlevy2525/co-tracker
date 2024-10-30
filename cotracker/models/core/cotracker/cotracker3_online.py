@@ -272,6 +272,7 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
         add_space_attn=True,
         fmaps_chunk_size=200,
         is_online=False,
+        one_frame=False,
     ):
         """Predict tracks
 
@@ -348,7 +349,10 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
                 self.online_conf_predicted = conf_predicted
             else:
                 # Pad online predictions with zeros for the current window
-                pad = min(step, T - step)
+                if one_frame:
+                    pad = min(1, T - 1)
+                else:
+                    pad = min(step, T - step)
                 coords_predicted = F.pad(
                     self.online_coords_predicted, (0, 0, 0, 0, 0, pad), "constant"
                 )
@@ -409,7 +413,7 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
             fmaps_pyramid.append(fmaps)
         if is_online:
             sample_frames = queried_frames[:, None, :, None]  # B 1 N 1
-            left = 0 if self.online_ind == 0 else self.online_ind + step
+            left = 0 if (self.online_ind == 0 or (self.online_ind < S and one_frame)) else self.online_ind + step
             right = self.online_ind + S
             sample_mask = (sample_frames >= left) & (sample_frames < right)
 
@@ -422,7 +426,8 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
             )
 
             if is_online:
-                if self.online_track_feat[i] is None:
+                # if self.online_track_feat[i] is None:
+                if self.online_track_feat[i] is None or (self.online_ind < S and one_frame):
                     self.online_track_feat[i] = torch.zeros_like(
                         track_feat, device=device
                     )
@@ -455,20 +460,27 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
 
         for ind in indices:
             if ind > 0:
-                overlap = S - step
+                if one_frame:
+                    # overlap = S - 1
+                    # expand = 1
+                    overlap = S - step
+                    expand = step
+                else:
+                    overlap = S - step
+                    expand = step
                 copy_over = (queried_frames < ind + overlap)[
                     :, None, :, None
                 ]  # B 1 N 1
                 coords_prev = coords_predicted[:, ind : ind + overlap] / self.stride
-                padding_tensor = coords_prev[:, -1:, :, :].expand(-1, step, -1, -1)
+                padding_tensor = coords_prev[:, -1:, :, :].expand(-1, expand, -1, -1)
                 coords_prev = torch.cat([coords_prev, padding_tensor], dim=1)
 
                 vis_prev = vis_predicted[:, ind : ind + overlap, :, None].clone()
-                padding_tensor = vis_prev[:, -1:, :, :].expand(-1, step, -1, -1)
+                padding_tensor = vis_prev[:, -1:, :, :].expand(-1, expand, -1, -1)
                 vis_prev = torch.cat([vis_prev, padding_tensor], dim=1)
 
                 conf_prev = conf_predicted[:, ind : ind + overlap, :, None].clone()
-                padding_tensor = conf_prev[:, -1:, :, :].expand(-1, step, -1, -1)
+                padding_tensor = conf_prev[:, -1:, :, :].expand(-1, expand, -1, -1)
                 conf_prev = torch.cat([conf_prev, padding_tensor], dim=1)
 
                 coords_init = torch.where(
@@ -481,7 +493,12 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
                     copy_over.expand_as(conf_init), conf_prev, conf_init
                 )
 
+
             attention_mask = (queried_frames < ind + S).reshape(B, 1, N)  # B S N
+            # if ind < S:
+            #     idx = min((S - ind - 1), step - 1)
+            #     attention_mask[:, :idx, :] = False
+
             # import ipdb; ipdb.set_trace()
             coords, viss, confs = self.forward_window(
                 fmaps_pyramid=(
@@ -492,6 +509,7 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
                 coords=coords_init,
                 track_feat_support_pyramid=[
                     attention_mask[:, None, :, :, None] * tfeat
+                    # attention_mask[:, :, :, None] * tfeat
                     for tfeat in track_feat_support_pyramid
                 ],
                 vis=vis_init,
@@ -503,9 +521,15 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
             S_trimmed = (
                 T if is_online else min(T - ind, S)
             )  # accounts for last window duration
-            coords_predicted[:, ind : ind + S] = coords[-1][:, :S_trimmed]
-            vis_predicted[:, ind : ind + S] = viss[-1][:, :S_trimmed]
-            conf_predicted[:, ind : ind + S] = confs[-1][:, :S_trimmed]
+            if one_frame and ind > 0:
+                coords_predicted[:, ind + step : ind + S] = coords[-1][:, S_trimmed - step:S_trimmed]
+                vis_predicted[:, ind + step : ind + S] = viss[-1][:, S_trimmed - step:S_trimmed]
+                conf_predicted[:, ind + step : ind + S] = confs[-1][:, S_trimmed - step:S_trimmed]
+            else:
+                coords_predicted[:, ind : ind + S] = coords[-1][:, :S_trimmed]
+                vis_predicted[:, ind : ind + S] = viss[-1][:, :S_trimmed]
+                conf_predicted[:, ind : ind + S] = confs[-1][:, :S_trimmed]
+
             if is_train:
                 all_coords_predictions.append(
                     [coord[:, :S_trimmed] for coord in coords]
@@ -517,7 +541,10 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
                     [torch.sigmoid(conf[:, :S_trimmed]) for conf in confs]
                 )
         if is_online:
-            self.online_ind += step
+            if one_frame:
+                self.online_ind += 1
+            else:
+                self.online_ind += step
             self.online_coords_predicted = coords_predicted
             self.online_vis_predicted = vis_predicted
             self.online_conf_predicted = conf_predicted
