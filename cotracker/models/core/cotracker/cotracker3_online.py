@@ -273,6 +273,7 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
         fmaps_chunk_size=200,
         is_online=False,
         one_frame=False,
+        step_size=1,
     ):
         """Predict tracks
 
@@ -317,6 +318,7 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
             assert not is_train, "Training not supported in online mode."
 
         step = S // 2  # How much the sliding window moves at every step
+        smaller_step = step_size
 
         video = 2 * (video / 255.0) - 1.0
         pad = (
@@ -350,7 +352,7 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
             else:
                 # Pad online predictions with zeros for the current window
                 if one_frame:
-                    pad = min(1, T - 1)
+                    pad = min(smaller_step, T - smaller_step)
                 else:
                     pad = min(step, T - step)
                 coords_predicted = F.pad(
@@ -460,14 +462,8 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
 
         for ind in indices:
             if ind > 0:
-                if one_frame:
-                    # overlap = S - 1
-                    # expand = 1
-                    overlap = S - step
-                    expand = step
-                else:
-                    overlap = S - step
-                    expand = step
+                overlap = S - step
+                expand = step
                 copy_over = (queried_frames < ind + overlap)[
                     :, None, :, None
                 ]  # B 1 N 1
@@ -542,7 +538,7 @@ class CoTrackerThreeOnline(CoTrackerThreeBase):
                 )
         if is_online:
             if one_frame:
-                self.online_ind += 1
+                self.online_ind += smaller_step
             else:
                 self.online_ind += step
             self.online_coords_predicted = coords_predicted

@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: cotracker
-Version: 2.0
+Version: 3.0
 License-File: LICENSE.md
 Provides-Extra: all
 Requires-Dist: matplotlib; extra == "all"

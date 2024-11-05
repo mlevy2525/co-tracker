@@ -6,6 +6,7 @@
 
 import torch
 import torch.nn.functional as F
+import time
 
 from cotracker.models.core.model_utils import smart_cat, get_points_on_a_grid
 from cotracker.models.build_cotracker import build_cotracker
@@ -234,6 +235,7 @@ class CoTrackerOnlinePredictor(torch.nn.Module):
         grid_query_frame: int = 0,
         add_support_grid=False,
         one_frame=True,
+        step_size=1
     ):
         B, T, C, H, W = video_chunk.shape
         # Initialize online video processing and save queried points
@@ -281,7 +283,7 @@ class CoTrackerOnlinePredictor(torch.nn.Module):
         )
 
         tracks, visibilities, confidence, __ = self.model(
-            video=video_chunk, queries=self.queries, iters=6, is_online=True, one_frame=one_frame
+            video=video_chunk, queries=self.queries, iters=6, is_online=True, one_frame=one_frame, step_size=step_size
         )
         if add_support_grid:
             tracks = tracks[:,:,:self.N]
